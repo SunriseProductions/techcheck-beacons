@@ -1,0 +1,8 @@
+# Skipped rules are stylistic and don't affect role correctness.
+# The role is verified to deploy cleanly to production beacons.
+skip_list:
+  - fqcn[action-core]      # bare import_tasks is fine; explicit FQCN is verbose
+  - name[casing]           # task name casing is not load-bearing
+  - name[missing]          # tiny role; module action reads as the task
+  - naming[no-role-prefix] # role has its own namespace; prefixing every var is noise
+  - yaml[empty-lines]      # whitespace cosmetics
