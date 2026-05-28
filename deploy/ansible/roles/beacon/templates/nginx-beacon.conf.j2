@@ -1,0 +1,50 @@
+# Managed by Ansible — see deploy/ansible/roles/beacon.
+
+limit_req_zone $binary_remote_addr zone=preflight:10m rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=preflight_conn:10m;
+
+log_format beacon_json escape=json '{'
+    '"ts":"$time_iso8601",'
+    '"ip":"$remote_addr",'
+    '"method":"$request_method",'
+    '"path":"$request_uri",'
+    '"status":$status,'
+    '"bytes":$body_bytes_sent,'
+    '"rtt":$request_time'
+'}';
+
+server {
+    listen 443 ssl http2;
+    server_name {{ inventory_hostname }};
+
+    ssl_certificate     /etc/letsencrypt/live/{{ inventory_hostname }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ inventory_hostname }}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    access_log {{ nginx_access_log }} beacon_json;
+
+    location /preflight/ {
+        limit_req zone=preflight burst=20 nodelay;
+        limit_conn preflight_conn 8;
+        proxy_pass http://{{ http_addr }};
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host $host;
+        client_max_body_size 6m;
+    }
+
+    location = /preflight/download/10mb {
+        limit_req zone=preflight burst=20 nodelay;
+        limit_conn preflight_conn 4;
+        proxy_pass http://{{ http_addr }};
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host $host;
+    }
+
+    location = /healthz {
+        proxy_pass http://{{ http_addr }};
+        access_log off;
+    }
+}

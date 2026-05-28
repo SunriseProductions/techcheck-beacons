@@ -1,0 +1,45 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+      - ufw
+    state: present
+
+- name: Create beacon group
+  ansible.builtin.group:
+    name: "{{ beacon_group }}"
+    system: true
+
+- name: Create beacon user
+  ansible.builtin.user:
+    name: "{{ beacon_user }}"
+    group: "{{ beacon_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/beacon
+    create_home: true
+
+- name: Create /etc/beacon
+  ansible.builtin.file:
+    path: /etc/beacon
+    state: directory
+    owner: root
+    group: "{{ beacon_group }}"
+    mode: "0750"
+
+- name: Create /etc/letsencrypt
+  ansible.builtin.file:
+    path: /etc/letsencrypt
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+

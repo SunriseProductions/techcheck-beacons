@@ -1,0 +1,26 @@
+[Unit]
+Description=Sunrise Preflight beacon
+Documentation=https://github.com/sunriseproductions/techcheck-beacons
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ beacon_user }}
+Group={{ beacon_group }}
+ExecStart={{ beacon_install_path }} --config {{ beacon_config_path }}
+Restart=on-failure
+RestartSec=5s
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+# Beacon needs to read its config file.
+ReadOnlyPaths={{ beacon_config_path }}
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

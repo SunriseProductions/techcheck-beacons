@@ -1,0 +1,17 @@
+---
+# Role defaults. Host-level overrides live in inventory.yml.
+udp_magic: PFLT
+udp_rate_limit: 50
+http_addr: 127.0.0.1:8080
+udp_addr: 0.0.0.0:4172
+
+beacon_binary_local: "{{ playbook_dir }}/../../build/beacon"
+beacon_install_path: /usr/local/bin/beacon
+beacon_config_path: /etc/beacon/config.json
+beacon_user: beacon
+beacon_group: beacon
+
+nginx_access_log: /var/log/nginx/beacon-access.log
+
+# Override per-host or via group_vars with your real ops contact.
+letsencrypt_email: "you@example.com"

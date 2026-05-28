@@ -1,0 +1,42 @@
+---
+- name: Ensure local beacon binary exists (run `make build-beacon` first)
+  ansible.builtin.stat:
+    path: "{{ beacon_binary_local }}"
+  delegate_to: localhost
+  become: false
+  register: _beacon_local
+  failed_when: not _beacon_local.stat.exists
+
+- name: Copy beacon binary to host
+  ansible.builtin.copy:
+    src: "{{ beacon_binary_local }}"
+    dest: "{{ beacon_install_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: restart beacon
+
+- name: Render beacon config
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ beacon_config_path }}"
+    owner: root
+    group: "{{ beacon_group }}"
+    mode: "0640"
+  notify: restart beacon
+
+- name: Install beacon systemd unit
+  ansible.builtin.template:
+    src: beacon.service.j2
+    dest: /etc/systemd/system/beacon.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart beacon
+
+- name: Enable and start beacon
+  ansible.builtin.systemd:
+    name: beacon
+    enabled: true
+    state: started
+    daemon_reload: true

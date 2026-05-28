@@ -1,0 +1,59 @@
+---
+# Ensures nginx is running on port 80 (default Ubuntu config) so certbot's
+# --nginx authenticator can solve HTTP-01 challenges, then issues the cert
+# and replaces the default site with the beacon reverse-proxy config.
+
+- name: Enable nginx
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: started
+
+- name: Issue Let's Encrypt certificate (HTTP-01 via --nginx)
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly
+      --non-interactive
+      --agree-tos
+      --email {{ letsencrypt_email }}
+      --nginx
+      -d {{ inventory_hostname }}
+    creates: /etc/letsencrypt/live/{{ inventory_hostname }}/fullchain.pem
+
+- name: Install nginx config for this beacon
+  ansible.builtin.template:
+    src: nginx-beacon.conf.j2
+    dest: /etc/nginx/sites-available/beacon.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload nginx
+
+- name: Enable nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/beacon.conf
+    dest: /etc/nginx/sites-enabled/beacon.conf
+    state: link
+  notify: reload nginx
+
+- name: Remove default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: reload nginx
+
+- name: Install certbot post-renewal hook to reload nginx
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/renewal-hooks/post/reload-nginx.sh
+    content: |
+      #!/bin/sh
+      systemctl reload nginx
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable certbot renewal timer
+  ansible.builtin.systemd:
+    name: certbot.timer
+    enabled: true
+    state: started

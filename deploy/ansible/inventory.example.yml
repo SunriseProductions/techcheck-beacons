@@ -1,0 +1,11 @@
+all:
+  children:
+    beacons:
+      hosts:
+        your-beacon-1.example.com:
+          pop_id: your-pop-id-1
+          geo: Your City
+          ansible_ssh_private_key_file: ~/.ssh/your_key.pem
+      vars:
+        ansible_user: ubuntu
+        ansible_python_interpreter: /usr/bin/python3

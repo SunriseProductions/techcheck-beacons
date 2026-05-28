@@ -1,0 +1,9 @@
+---
+- import_tasks: system.yml
+  tags: [system]
+
+- import_tasks: beacon.yml
+  tags: [beacon]
+
+- import_tasks: nginx.yml
+  tags: [nginx]
