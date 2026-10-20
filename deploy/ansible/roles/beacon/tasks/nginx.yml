@@ -20,6 +20,23 @@
       -d {{ inventory_hostname }}
     creates: /etc/letsencrypt/live/{{ inventory_hostname }}/fullchain.pem
 
+- name: Create beacon web root
+  ansible.builtin.file:
+    path: "{{ beacon_webroot }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render beacon landing page
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: "{{ beacon_webroot }}/index.html"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload nginx
+
 - name: Install nginx config for this beacon
   ansible.builtin.template:
     src: nginx-beacon.conf.j2

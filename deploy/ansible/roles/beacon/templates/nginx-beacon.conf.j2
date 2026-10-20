@@ -24,6 +24,18 @@ server {
 
     access_log {{ nginx_access_log }} beacon_json;
 
+    root {{ beacon_webroot }};
+
+    # Branded landing page at the root; everything else not matched below
+    # returns 404 rather than falling through to nginx's default doc root.
+    location = / {
+        try_files /index.html =404;
+    }
+
+    location / {
+        return 404;
+    }
+
     location /preflight/ {
         limit_req zone=preflight burst=20 nodelay;
         limit_conn preflight_conn 8;

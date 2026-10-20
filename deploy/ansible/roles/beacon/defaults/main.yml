@@ -12,6 +12,7 @@ beacon_user: beacon
 beacon_group: beacon
 
 nginx_access_log: /var/log/nginx/beacon-access.log
+beacon_webroot: /var/www/beacon
 
 # Override per-host or via group_vars with your real ops contact.
 letsencrypt_email: "you@example.com"
