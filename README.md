@@ -15,9 +15,24 @@ The client expects these endpoints from each beacon:
 | `GET`   | `/preflight/download/10mb` | 10 MB random payload for throughput     |
 | `POST`  | `/preflight/upload`        | Discards up to 5 MB; for upload throughput |
 | `GET`   | `/preflight/whoami`        | Returns client IP, POP ID, region label |
-| UDP     | `:4172` (echo)             | Magic-prefixed echo for UDP RTT/jitter  |
+| UDP     | `:4172`, `:8443` (echo)    | Magic-prefixed echo for UDP RTT/jitter  |
 
 Bandwidth-related endpoints are gated by a small in-process semaphore that replies `503 Retry-After: 5` when busy.
+
+nginx also accepts HTTPS on TCP `8443` (same certificate and rules as `443`), the port Amazon DCV uses.
+
+### UDP stream test
+
+On either UDP port, a client can request a stream of sequenced packets to measure loss, jitter and reordering. Each packet starts with the magic and a one-byte type:
+
+- `H` hello (client): version, nonce, rate, packet size, duration.
+- `C` cookie (beacon): nonce and a cookie bound to the client address.
+- `S` start (client): the hello body plus the cookie. Only a valid cookie gets a stream, so a spoofed source cannot aim traffic at a third party.
+- `B` busy (beacon): retry-after seconds.
+- `D` data (beacon): sequence number, send timestamp, padding.
+- `E` end (beacon): total packets sent.
+
+Caps: 40 Mbit/s, 15 s, packet size 200-1400 bytes. A stream takes a slot from the same semaphore as the HTTP bandwidth endpoints. The beacon replies `B` when no slot is free.
 
 ## Build
 

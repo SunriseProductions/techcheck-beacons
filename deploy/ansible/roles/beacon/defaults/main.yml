@@ -3,7 +3,7 @@
 udp_magic: PFLT
 udp_rate_limit: 50
 http_addr: 127.0.0.1:8080
-udp_addr: 0.0.0.0:4172
+udp_addrs: ["0.0.0.0:4172", "0.0.0.0:8443"]
 
 beacon_binary_local: "{{ playbook_dir }}/../../build/beacon"
 beacon_install_path: /usr/local/bin/beacon

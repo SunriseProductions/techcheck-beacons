@@ -2,7 +2,7 @@
   "pop_id": "{{ pop_id }}",
   "geo": "{{ geo }}",
   "http_addr": "{{ http_addr }}",
-  "udp_addr": "{{ udp_addr }}",
+  "udp_addrs": {{ udp_addrs | to_json }},
   "udp_magic": "{{ udp_magic }}",
   "udp_rate_limit": {{ udp_rate_limit }}
 }

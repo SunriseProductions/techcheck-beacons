@@ -7,7 +7,7 @@ Ansible role + playbook that configures a beacon node. The playbook handles ever
 - Ansible 2.16+ (`pipx install ansible-core`)
 - Each beacon host reachable on SSH as `ubuntu` with the matching `.pem` key at the path listed in your inventory
 - DNS A record for each beacon hostname pointing at the host
-- Ports 22/80/443/TCP and 4172/UDP open in the host's security group
+- Ports 22/80/443/8443/TCP and 4172/8443/UDP open in the host's security group
 - Beacon binary built: `make build-beacon` from the repo root
 
 ## Configure inventory
@@ -43,7 +43,7 @@ ansible-playbook -i /path/to/your/inventory.yml playbook.yml --check --diff
 
 ## Adding a new POP
 
-1. Provision the box (public subnet, public IP, SG with 22/80/443/TCP + 4172/UDP).
+1. Provision the box (public subnet, public IP, SG with 22/80/443/8443/TCP + 4172/8443/UDP).
 2. Add an A record at your DNS provider pointing the hostname at the box.
 3. Add a host block to your inventory with `pop_id`, `geo`, and `ansible_ssh_private_key_file`.
 4. Run the playbook with `--limit <host>`.
