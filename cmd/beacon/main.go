@@ -49,9 +49,10 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	streams := newStreamOwners()
 	var udps []*udpEcho
 	for _, addr := range cfg.UDPAddrs {
-		u, err := newUDPEcho(cfg, addr, sem, key)
+		u, err := newUDPEcho(cfg, addr, sem, streams, key)
 		if err != nil {
 			logJSON("error", "udp listen failed", map[string]any{"addr": addr, "err": err.Error()})
 			os.Exit(1)

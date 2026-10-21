@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -41,6 +42,35 @@ const (
 	endRepeats          = 3
 	endInterval         = 20 * time.Millisecond
 )
+
+// streamOwners holds the source IPs that have a stream running. Every UDP
+// listener shares it, so one client gets one stream at a time, whatever its
+// source port or the beacon port.
+type streamOwners struct {
+	mu  sync.Mutex
+	ips map[string]bool
+}
+
+func newStreamOwners() *streamOwners {
+	return &streamOwners{ips: make(map[string]bool)}
+}
+
+// claim records ip as streaming. It reports false when ip already is.
+func (o *streamOwners) claim(ip string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.ips[ip] {
+		return false
+	}
+	o.ips[ip] = true
+	return true
+}
+
+func (o *streamOwners) drop(ip string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.ips, ip)
+}
 
 type streamParams struct {
 	nonce       [8]byte
@@ -126,55 +156,39 @@ func (u *udpEcho) handleStart(pkt []byte, src *net.UDPAddr) {
 	if !ok || !verifyCookie(u.key, src, body, cookie, time.Now()) {
 		return
 	}
+	// One stream per source IP, so a client cannot take both slots by
+	// using two source ports.
+	ip := src.IP.String()
+	if !u.streams.claim(ip) {
+		u.replyBusy(p, src)
+		return
+	}
 	if !u.sem.tryAcquire() {
-		reply := binary.BigEndian.AppendUint16(u.packetHeader('B', p.nonce[:]), bandwidthRetryAfter)
-		if _, err := u.conn.WriteToUDP(reply, src); err != nil {
-			log.Printf("beacon udp: write %s: %v", src, err)
-		}
+		u.streams.drop(ip)
+		u.replyBusy(p, src)
 		return
 	}
 	go u.stream(p, src)
 }
 
+func (u *udpEcho) replyBusy(p streamParams, src *net.UDPAddr) {
+	reply := binary.BigEndian.AppendUint16(u.packetHeader('B', p.nonce[:]), bandwidthRetryAfter)
+	if _, err := u.conn.WriteToUDP(reply, src); err != nil {
+		log.Printf("beacon udp: write %s: %v", src, err)
+	}
+}
+
 // stream sends the data packets, then the end marker. It stops early on
-// shutdown or a write error. The caller has taken a semaphore slot; stream
-// releases it on every path.
+// shutdown or a write error. The caller has taken a semaphore slot and
+// claimed the source IP; stream gives both back on every path, right after
+// the last data packet, so the next stream can start while the end markers
+// still go out.
 func (u *udpEcho) stream(p streamParams, src *net.UDPAddr) {
-	defer u.sem.release()
-
-	pktsPerSec := float64(p.rateKbps) * 1000 / 8 / float64(p.packetBytes)
-	total := uint32(pktsPerSec * p.duration.Seconds())
-
-	pkt := make([]byte, p.packetBytes)
-	hdr := u.packetHeader('D', p.nonce[:])
-	copy(pkt, hdr)
-	seqOff := len(hdr)
-
-	var sent uint32
-	start := time.Now()
-	ticker := time.NewTicker(streamTick)
-	defer ticker.Stop()
-sending:
-	for sent < total {
-		select {
-		case <-u.ctx.Done():
-			break sending
-		case <-ticker.C:
-		}
-		due := total
-		if elapsed := time.Since(start); elapsed < p.duration {
-			due = uint32(pktsPerSec * elapsed.Seconds())
-		}
-		for ; sent < due; sent++ {
-			binary.BigEndian.PutUint32(pkt[seqOff:], sent)
-			binary.BigEndian.PutUint64(pkt[seqOff+4:], uint64(time.Now().UnixNano()))
-			if _, err := u.conn.WriteToUDP(pkt, src); err != nil {
-				if !errors.Is(err, net.ErrClosed) {
-					log.Printf("beacon udp: stream to %s stopped after %d packets: %v", src, sent, err)
-				}
-				return
-			}
-		}
+	sent, ok := u.sendData(p, src)
+	u.sem.release()
+	u.streams.drop(src.IP.String())
+	if !ok {
+		return
 	}
 
 	end := binary.BigEndian.AppendUint32(u.packetHeader('E', p.nonce[:]), sent)
@@ -189,4 +203,42 @@ sending:
 			return
 		}
 	}
+}
+
+// sendData paces the data packets and returns how many went out. ok is false
+// after a write error; shutdown stops the packets but still sends the end.
+func (u *udpEcho) sendData(p streamParams, src *net.UDPAddr) (sent uint32, ok bool) {
+	pktsPerSec := float64(p.rateKbps) * 1000 / 8 / float64(p.packetBytes)
+	total := uint32(pktsPerSec * p.duration.Seconds())
+
+	pkt := make([]byte, p.packetBytes)
+	hdr := u.packetHeader('D', p.nonce[:])
+	copy(pkt, hdr)
+	seqOff := len(hdr)
+
+	start := time.Now()
+	ticker := time.NewTicker(streamTick)
+	defer ticker.Stop()
+	for sent < total {
+		select {
+		case <-u.ctx.Done():
+			return sent, true
+		case <-ticker.C:
+		}
+		due := total
+		if elapsed := time.Since(start); elapsed < p.duration {
+			due = uint32(pktsPerSec * elapsed.Seconds())
+		}
+		for ; sent < due; sent++ {
+			binary.BigEndian.PutUint32(pkt[seqOff:], sent)
+			binary.BigEndian.PutUint64(pkt[seqOff+4:], uint64(time.Now().UnixNano()))
+			if _, err := u.conn.WriteToUDP(pkt, src); err != nil {
+				if !errors.Is(err, net.ErrClosed) {
+					log.Printf("beacon udp: stream to %s stopped after %d packets: %v", src, sent, err)
+				}
+				return sent, false
+			}
+		}
+	}
+	return sent, true
 }

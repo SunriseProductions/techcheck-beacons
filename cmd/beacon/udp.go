@@ -14,6 +14,7 @@ type udpEcho struct {
 	magic     []byte
 	rateLimit int
 	sem       bandwidthSem
+	streams   *streamOwners
 	key       []byte
 	// ctx is set by run and stops stream goroutines on shutdown.
 	ctx context.Context
@@ -27,7 +28,7 @@ type bucket struct {
 	lastFill time.Time
 }
 
-func newUDPEcho(cfg *config, addr string, sem bandwidthSem, key []byte) (*udpEcho, error) {
+func newUDPEcho(cfg *config, addr string, sem bandwidthSem, streams *streamOwners, key []byte) (*udpEcho, error) {
 	ua, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, err
@@ -45,6 +46,7 @@ func newUDPEcho(cfg *config, addr string, sem bandwidthSem, key []byte) (*udpEch
 		magic:     []byte(cfg.UDPMagic),
 		rateLimit: cfg.UDPRateLimit,
 		sem:       sem,
+		streams:   streams,
 		key:       key,
 		buckets:   make(map[string]*bucket),
 	}, nil

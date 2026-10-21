@@ -18,7 +18,7 @@ func startUDP(t *testing.T, cfg *config) (*udpEcho, string) {
 
 func startUDPWith(t *testing.T, cfg *config, sem bandwidthSem, key []byte) (*udpEcho, string) {
 	t.Helper()
-	u, err := newUDPEcho(cfg, "127.0.0.1:0", sem, key)
+	u, err := newUDPEcho(cfg, "127.0.0.1:0", sem, newStreamOwners(), key)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

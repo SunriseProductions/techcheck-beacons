@@ -194,7 +194,7 @@ func TestStreamBusyWhenSemFull(t *testing.T) {
 	sem := newBandwidthSem(bandwidthConcurrency)
 	require.True(t, sem.tryAcquire())
 	require.True(t, sem.tryAcquire())
-	_, addr := startUDPWith(t, streamCfg(), sem, testKey)
+	u, addr := startUDPWith(t, streamCfg(), sem, testKey)
 	conn := dialUDP(t, addr)
 
 	body := helloBody("nonce-07", 2000, 1250, 500)
@@ -211,11 +211,18 @@ func TestStreamBusyWhenSemFull(t *testing.T) {
 	assert.Equal(t, "nonce-07", string(buf[5:13]))
 	assert.Equal(t, uint16(bandwidthRetryAfter), binary.BigEndian.Uint16(buf[13:15]))
 	expectSilence(t, conn, 100*time.Millisecond)
+	assert.False(t, isStreaming(u, "127.0.0.1"), "a busy reply must not hold the source IP")
+}
+
+func isStreaming(u *udpEcho, ip string) bool {
+	u.streams.mu.Lock()
+	defer u.streams.mu.Unlock()
+	return u.streams.ips[ip]
 }
 
 func TestStreamReleasesSlotOnShutdown(t *testing.T) {
 	sem := newBandwidthSem(bandwidthConcurrency)
-	u, err := newUDPEcho(streamCfg(), "127.0.0.1:0", sem, testKey)
+	u, err := newUDPEcho(streamCfg(), "127.0.0.1:0", sem, newStreamOwners(), testKey)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -231,6 +238,8 @@ func TestStreamReleasesSlotOnShutdown(t *testing.T) {
 	cancel()
 	assert.Eventually(t, func() bool { return len(sem) == 0 }, time.Second, 5*time.Millisecond,
 		"shutdown must release the stream's slot")
+	assert.Eventually(t, func() bool { return !isStreaming(u, "127.0.0.1") }, time.Second, 5*time.Millisecond,
+		"shutdown must free the source IP")
 }
 
 func TestEchoStillWorksOnBothKinds(t *testing.T) {
@@ -249,4 +258,89 @@ func TestEchoStillWorksOnBothKinds(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, payload, buf[:n])
 	}
+}
+
+// readUntilType reads packets until one of type typ arrives, and fails on any
+// other stream packet type except D.
+func readUntilType(t *testing.T, conn *net.UDPConn, typ byte) []byte {
+	t.Helper()
+	buf := make([]byte, 1500)
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(3*time.Second)))
+	for {
+		n, err := conn.Read(buf)
+		require.NoError(t, err)
+		if buf[4] == typ {
+			return append([]byte(nil), buf[:n]...)
+		}
+		require.Equal(t, byte('D'), buf[4], "unexpected %q packet", buf[4])
+	}
+}
+
+func TestStreamFreesSlotBeforeEndMarkers(t *testing.T) {
+	sem := newBandwidthSem(bandwidthConcurrency)
+	require.True(t, sem.tryAcquire(), "leave one free slot")
+	_, addr := startUDPWith(t, streamCfg(), sem, testKey)
+	connA := dialUDP(t, addr)
+	connB := dialUDP(t, addr)
+	require.NoError(t, connA.SetReadBuffer(1<<20))
+
+	bodyB := helloBody("nonce-0b", 2000, 1250, 200)
+	cookieB := requestCookie(t, connB, bodyB)
+
+	bodyA := helloBody("nonce-0a", 2000, 1250, 200)
+	cookieA := requestCookie(t, connA, bodyA)
+	_, err := connA.Write(startPkt(bodyA, cookieA))
+	require.NoError(t, err)
+	readUntilType(t, connA, 'E')
+
+	// A's end markers are still going out; its slot must already be free.
+	_, err = connB.Write(startPkt(bodyB, cookieB))
+	require.NoError(t, err)
+	buf := make([]byte, 1500)
+	require.NoError(t, connB.SetReadDeadline(time.Now().Add(time.Second)))
+	_, err = connB.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "PFLTD", string(buf[:5]), "second stream must get data, not busy")
+
+	require.NoError(t, connA.SetReadDeadline(time.Now().Add(time.Second)))
+	n, err := connA.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "PFLTE", string(buf[:5]), "first stream still sends its later end markers")
+	assert.Equal(t, 4+1+8+4, n)
+}
+
+func TestStreamOnePerSourceIP(t *testing.T) {
+	sem := newBandwidthSem(bandwidthConcurrency)
+	_, addr := startUDPWith(t, streamCfg(), sem, testKey)
+	connA := dialUDP(t, addr)
+	connB := dialUDP(t, addr)
+	require.NoError(t, connA.SetReadBuffer(1<<20))
+
+	bodyA := helloBody("nonce-09", 2000, 1250, 300)
+	cookieA := requestCookie(t, connA, bodyA)
+	_, err := connA.Write(startPkt(bodyA, cookieA))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return len(sem) == 1 }, time.Second, 5*time.Millisecond)
+
+	// Same IP, other source port, while A's stream runs.
+	bodyB := helloBody("nonce-10", 2000, 1250, 300)
+	cookieB := requestCookie(t, connB, bodyB)
+	_, err = connB.Write(startPkt(bodyB, cookieB))
+	require.NoError(t, err)
+	busy := readUntilType(t, connB, 'B')
+	assert.Equal(t, "nonce-10", string(busy[5:13]))
+	assert.Equal(t, uint16(bandwidthRetryAfter), binary.BigEndian.Uint16(busy[13:15]))
+	assert.Equal(t, 1, len(sem), "a refused start must not take a slot")
+
+	// Once A's stream is over, the same IP can stream again.
+	readUntilType(t, connA, 'E')
+	bodyB = helloBody("nonce-11", 2000, 1250, 300)
+	cookieB = requestCookie(t, connB, bodyB)
+	_, err = connB.Write(startPkt(bodyB, cookieB))
+	require.NoError(t, err)
+	buf := make([]byte, 1500)
+	require.NoError(t, connB.SetReadDeadline(time.Now().Add(time.Second)))
+	_, err = connB.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "PFLTD", string(buf[:5]))
 }
