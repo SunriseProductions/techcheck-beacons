@@ -13,7 +13,12 @@ import (
 
 func startUDP(t *testing.T, cfg *config) (*udpEcho, string) {
 	t.Helper()
-	u, err := newUDPEcho(cfg, "127.0.0.1:0", newBandwidthSem(bandwidthConcurrency), nil)
+	return startUDPWith(t, cfg, newBandwidthSem(bandwidthConcurrency), nil)
+}
+
+func startUDPWith(t *testing.T, cfg *config, sem bandwidthSem, key []byte) (*udpEcho, string) {
+	t.Helper()
+	u, err := newUDPEcho(cfg, "127.0.0.1:0", sem, key)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

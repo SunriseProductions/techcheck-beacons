@@ -30,7 +30,7 @@ func main() {
 	})
 
 	sem := newBandwidthSem(bandwidthConcurrency)
-	// Reserved for the UDP stream service (signs and verifies tokens).
+	// Signs and verifies the UDP stream cookies.
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		logJSON("error", "key generation failed", map[string]any{"err": err.Error()})

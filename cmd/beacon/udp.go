@@ -15,6 +15,8 @@ type udpEcho struct {
 	rateLimit int
 	sem       bandwidthSem
 	key       []byte
+	// ctx is set by run and stops stream goroutines on shutdown.
+	ctx context.Context
 
 	mu      sync.Mutex
 	buckets map[string]*bucket
@@ -34,6 +36,10 @@ func newUDPEcho(cfg *config, addr string, sem bandwidthSem, key []byte) (*udpEch
 	if err != nil {
 		return nil, err
 	}
+	// Room for bursts from up to two streams at the rate cap.
+	if err := conn.SetWriteBuffer(4 << 20); err != nil {
+		log.Printf("beacon udp: set write buffer on %s: %v", addr, err)
+	}
 	return &udpEcho{
 		conn:      conn,
 		magic:     []byte(cfg.UDPMagic),
@@ -45,6 +51,7 @@ func newUDPEcho(cfg *config, addr string, sem bandwidthSem, key []byte) (*udpEch
 }
 
 func (u *udpEcho) run(ctx context.Context) {
+	u.ctx = ctx
 	go func() {
 		<-ctx.Done()
 		_ = u.conn.Close()
@@ -60,6 +67,18 @@ func (u *udpEcho) run(ctx context.Context) {
 		}
 		if !u.allow(addr.IP.String()) {
 			continue
+		}
+		// The byte after the magic selects a stream message. Anything else
+		// is a plain echo, which clients send as magic + 0x00 + nonce.
+		if n > len(u.magic) {
+			switch buf[len(u.magic)] {
+			case 'H':
+				u.handleHello(buf[:n], addr)
+				continue
+			case 'S':
+				u.handleStart(buf[:n], addr)
+				continue
+			}
 		}
 		// Copy payload — ReadFromUDP reuses buf.
 		payload := make([]byte, n)
