@@ -16,3 +16,6 @@ AGENTS.md
 # OS / editor
 *.log
 .DS_Store
+
+# Local git worktrees
+.worktrees/
