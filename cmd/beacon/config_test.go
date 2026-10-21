@@ -19,7 +19,7 @@ func TestLoadConfigRequiredFields(t *testing.T) {
 	assert.Equal(t, "eu-west-2", cfg.POPID)
 	assert.Equal(t, "London", cfg.Geo)
 	assert.Equal(t, "127.0.0.1:8080", cfg.HTTPAddr)
-	assert.Equal(t, "0.0.0.0:4172", cfg.UDPAddr)
+	assert.Equal(t, []string{"0.0.0.0:4172", "0.0.0.0:8443"}, cfg.UDPAddrs)
 	assert.Equal(t, "PFLT", cfg.UDPMagic)
 	assert.Equal(t, 50, cfg.UDPRateLimit)
 }
@@ -48,7 +48,27 @@ func TestLoadConfigOverrides(t *testing.T) {
 	cfg, err := loadConfig("testdata/config.json")
 	require.NoError(t, err)
 	assert.Equal(t, "127.0.0.1:19091", cfg.HTTPAddr)
-	assert.Equal(t, "127.0.0.1:14172", cfg.UDPAddr)
+	assert.Equal(t, []string{"127.0.0.1:14172"}, cfg.UDPAddrs)
 	assert.Equal(t, "TESTMAGIC", cfg.UDPMagic)
 	assert.Equal(t, 5, cfg.UDPRateLimit)
+}
+
+func TestLoadConfigDefaultsUDPAddrs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"pop_id": "eu-west-2", "geo": "London"}`), 0o644))
+
+	cfg, err := loadConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0.0.0.0:4172", "0.0.0.0:8443"}, cfg.UDPAddrs)
+}
+
+func TestLoadConfigLegacyUDPAddr(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"pop_id": "eu-west-2", "geo": "London", "udp_addr": "127.0.0.1:14172"}`), 0o644))
+
+	cfg, err := loadConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"127.0.0.1:14172", "0.0.0.0:8443"}, cfg.UDPAddrs)
 }

@@ -9,9 +9,12 @@ import (
 )
 
 type config struct {
-	POPID        string `json:"pop_id"`
-	Geo          string `json:"geo"`
-	HTTPAddr     string `json:"http_addr"`
+	POPID    string   `json:"pop_id"`
+	Geo      string   `json:"geo"`
+	HTTPAddr string   `json:"http_addr"`
+	UDPAddrs []string `json:"udp_addrs"`
+	// UDPAddr is the legacy single-address key. If set, it replaces the
+	// first entry of UDPAddrs.
 	UDPAddr      string `json:"udp_addr"`
 	UDPMagic     string `json:"udp_magic"`
 	UDPRateLimit int    `json:"udp_rate_limit"`
@@ -20,7 +23,7 @@ type config struct {
 func loadConfig(path string) (*config, error) {
 	cfg := &config{
 		HTTPAddr:     "127.0.0.1:8080",
-		UDPAddr:      "0.0.0.0:4172",
+		UDPAddrs:     []string{"0.0.0.0:4172", "0.0.0.0:8443"},
 		UDPMagic:     "PFLT",
 		UDPRateLimit: 50,
 	}
@@ -30,6 +33,9 @@ func loadConfig(path string) (*config, error) {
 	}
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	if cfg.UDPAddr != "" && len(cfg.UDPAddrs) > 0 {
+		cfg.UDPAddrs[0] = cfg.UDPAddr
 	}
 	if cfg.POPID == "" {
 		return nil, fmt.Errorf("config: pop_id is required")

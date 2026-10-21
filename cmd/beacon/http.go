@@ -24,14 +24,12 @@ const (
 	bandwidthRetryAfter  = 5 // seconds
 )
 
-func newHTTPHandler(cfg *config) (http.Handler, error) {
+func newHTTPHandler(cfg *config, bwSem bandwidthSem) (http.Handler, error) {
 	// Pre-allocate the 10 MB download buffer once at startup — spec §3.1.
 	downloadBuf := make([]byte, downloadSize)
 	if _, err := rand.Read(downloadBuf); err != nil {
 		return nil, err
 	}
-
-	bwSem := make(chan struct{}, bandwidthConcurrency)
 
 	mux := http.NewServeMux()
 
@@ -85,20 +83,40 @@ func newHTTPHandler(cfg *config) (http.Handler, error) {
 	return mux, nil
 }
 
+// bandwidthSem limits concurrent bandwidth tests across HTTP and UDP.
+type bandwidthSem chan struct{}
+
+func newBandwidthSem(n int) bandwidthSem {
+	return make(bandwidthSem, n)
+}
+
+// tryAcquire takes a slot without blocking. It reports whether it got one.
+func (s bandwidthSem) tryAcquire() bool {
+	select {
+	case s <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s bandwidthSem) release() {
+	<-s
+}
+
 // withBandwidthSem acquires a slot from the shared bandwidth semaphore before
 // handing off to the wrapped handler. When full, replies 503 with Retry-After
 // so clients can back off. Non-blocking — we never queue; the client is
 // expected to retry after the hint.
-func withBandwidthSem(sem chan struct{}, next http.HandlerFunc) http.HandlerFunc {
+func withBandwidthSem(sem bandwidthSem, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case sem <- struct{}{}:
-			defer func() { <-sem }()
-			next(w, r)
-		default:
+		if !sem.tryAcquire() {
 			w.Header().Set("Retry-After", strconv.Itoa(bandwidthRetryAfter))
 			http.Error(w, "pop bandwidth tests busy, retry shortly", http.StatusServiceUnavailable)
+			return
 		}
+		defer sem.release()
+		next(w, r)
 	}
 }
 
@@ -118,4 +136,3 @@ func clientIP(r *http.Request) string {
 	}
 	return host
 }
-

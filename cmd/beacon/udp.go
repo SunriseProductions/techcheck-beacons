@@ -13,6 +13,8 @@ type udpEcho struct {
 	conn      *net.UDPConn
 	magic     []byte
 	rateLimit int
+	sem       bandwidthSem
+	key       []byte
 
 	mu      sync.Mutex
 	buckets map[string]*bucket
@@ -23,12 +25,8 @@ type bucket struct {
 	lastFill time.Time
 }
 
-func newUDPEcho(cfg *config, addr string) (*udpEcho, error) {
-	bindAddr := cfg.UDPAddr
-	if addr != "" {
-		bindAddr = addr
-	}
-	ua, err := net.ResolveUDPAddr("udp", bindAddr)
+func newUDPEcho(cfg *config, addr string, sem bandwidthSem, key []byte) (*udpEcho, error) {
+	ua, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +38,8 @@ func newUDPEcho(cfg *config, addr string) (*udpEcho, error) {
 		conn:      conn,
 		magic:     []byte(cfg.UDPMagic),
 		rateLimit: cfg.UDPRateLimit,
+		sem:       sem,
+		key:       key,
 		buckets:   make(map[string]*bucket),
 	}, nil
 }

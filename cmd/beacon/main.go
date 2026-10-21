@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"log"
@@ -25,10 +26,18 @@ func main() {
 		"pop_id":    cfg.POPID,
 		"geo":       cfg.Geo,
 		"http_addr": cfg.HTTPAddr,
-		"udp_addr":  cfg.UDPAddr,
+		"udp_addrs": cfg.UDPAddrs,
 	})
 
-	handler, err := newHTTPHandler(cfg)
+	sem := newBandwidthSem(bandwidthConcurrency)
+	// Reserved for the UDP stream service (signs and verifies tokens).
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		logJSON("error", "key generation failed", map[string]any{"err": err.Error()})
+		os.Exit(1)
+	}
+
+	handler, err := newHTTPHandler(cfg, sem)
 	if err != nil {
 		logJSON("error", "http handler init failed", map[string]any{"err": err.Error()})
 		os.Exit(1)
@@ -40,10 +49,14 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	udp, err := newUDPEcho(cfg, "")
-	if err != nil {
-		logJSON("error", "udp listen failed", map[string]any{"err": err.Error()})
-		os.Exit(1)
+	var udps []*udpEcho
+	for _, addr := range cfg.UDPAddrs {
+		u, err := newUDPEcho(cfg, addr, sem, key)
+		if err != nil {
+			logJSON("error", "udp listen failed", map[string]any{"addr": addr, "err": err.Error()})
+			os.Exit(1)
+		}
+		udps = append(udps, u)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -54,7 +67,9 @@ func main() {
 			logJSON("error", "http serve failed", map[string]any{"err": err.Error()})
 		}
 	}()
-	go udp.run(ctx)
+	for _, u := range udps {
+		go u.run(ctx)
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)

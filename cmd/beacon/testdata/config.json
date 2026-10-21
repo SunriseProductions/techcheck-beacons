@@ -2,7 +2,7 @@
   "pop_id": "test",
   "geo": "Localhost",
   "http_addr": "127.0.0.1:19091",
-  "udp_addr": "127.0.0.1:14172",
+  "udp_addrs": ["127.0.0.1:14172"],
   "udp_magic": "TESTMAGIC",
   "udp_rate_limit": 5
 }

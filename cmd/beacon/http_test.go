@@ -17,8 +17,13 @@ import (
 
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
+	return newTestHandlerWithSem(t, newBandwidthSem(bandwidthConcurrency))
+}
+
+func newTestHandlerWithSem(t *testing.T, sem bandwidthSem) http.Handler {
+	t.Helper()
 	cfg := &config{POPID: "test", Geo: "Localhost", UDPMagic: "PFLT"}
-	h, err := newHTTPHandler(cfg)
+	h, err := newHTTPHandler(cfg, sem)
 	require.NoError(t, err)
 	return h
 }
@@ -293,4 +298,30 @@ func TestBandwidthSemaphoreDoesNotAffectCheapEndpoints(t *testing.T) {
 
 	close(release)
 	wg.Wait()
+}
+
+// A slot taken outside the HTTP handler (the UDP stream service will do this)
+// counts against the same limit as HTTP bandwidth tests.
+func TestBandwidthSemSharedAcrossHTTPAndUDP(t *testing.T) {
+	sem := newBandwidthSem(bandwidthConcurrency)
+	srv := httptest.NewServer(newTestHandlerWithSem(t, sem))
+	defer srv.Close()
+
+	for i := 0; i < bandwidthConcurrency; i++ {
+		require.True(t, sem.tryAcquire())
+	}
+
+	resp, err := http.Get(srv.URL + "/preflight/download/10mb")
+	require.NoError(t, err)
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	assert.Equal(t, "5", resp.Header.Get("Retry-After"))
+
+	sem.release()
+	resp, err = http.Get(srv.URL + "/preflight/download/10mb")
+	require.NoError(t, err)
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
